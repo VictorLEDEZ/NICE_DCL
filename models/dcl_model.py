@@ -182,7 +182,7 @@ class DCLModel(BaseModel):
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
-    def forward(self):  # ? here
+    def forward(self):  # ? here => done v1
         # * Here we don't compute fake_B2A2B and fake_A2B2A as there is no Cycle-Consistency Loss
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         # self.fake_A2B = self.gen2B(self.real_A)  # G_A(A)
@@ -204,7 +204,7 @@ class DCLModel(BaseModel):
             self.idt_A = self.gen2B(self.real_B_z)
             self.idt_B = self.gen2A(self.real_A_z)
 
-    def backward_D_basic(self, netD, real, fake):  # ? here
+    def backward_D_basic(self, netD, real, fake):
         """Calculate GAN loss for the discriminator
         Parameters:
             netD (network)      -- the discriminator D
@@ -237,16 +237,16 @@ class DCLModel(BaseModel):
         self.loss_D_B = self.backward_D_basic(
             self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN
 
-    def compute_G_loss(self):
+    def compute_G_loss(self):  # ? here
         """Calculate GAN and NCE loss for the generator"""
-        fakeB = self.fake_A2B
-        fakeA = self.fake_B2A
+        fake_A2B = self.fake_A2B
+        fake_B2A = self.fake_B2A
 
         # ! GAN LOSS ###########################################################
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
-            pred_fakeB = self.disA(fakeB)
-            pred_fakeA = self.disB(fakeA)
+            pred_fakeB = self.disA(fake_A2B)
+            pred_fakeA = self.disB(fake_B2A)
             self.loss_G_A = self.criterionGAN(
                 pred_fakeB, True).mean() * self.opt.lambda_GAN
             self.loss_G_B = self.criterionGAN(
@@ -280,10 +280,12 @@ class DCLModel(BaseModel):
         self.loss_G = (self.loss_G_A + self.loss_G_B) * 0.5 + loss_NCE_both
         return self.loss_G
 
-    def calculate_NCE_loss1(self, src, tgt):
+    def calculate_NCE_loss1(self, src, tgt):  # ? here
         n_layers = len(self.nce_layers)
-        feat_q = self.gen2A(tgt, self.nce_layers, encode_only=True)
-        feat_k = self.gen2B(src, self.nce_layers, encode_only=True)
+        _, src_z = self.disA(src)
+        _, tgt_z = self.disB(tgt)
+        feat_q = self.gen2A(tgt_z, self.nce_layers, encode_only=True)
+        feat_k = self.gen2B(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF1(
             feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF2(feat_q, self.opt.num_patches, sample_ids)
@@ -293,10 +295,12 @@ class DCLModel(BaseModel):
             total_nce_loss += loss.mean()
         return total_nce_loss / n_layers
 
-    def calculate_NCE_loss2(self, src, tgt):
+    def calculate_NCE_loss2(self, src, tgt):  # ? here
         n_layers = len(self.nce_layers)
-        feat_q = self.gen2B(tgt, self.nce_layers, encode_only=True)
-        feat_k = self.gen2A(src, self.nce_layers, encode_only=True)
+        _, src_z = self.disA(src)
+        _, tgt_z = self.disB(tgt)
+        feat_q = self.gen2B(tgt_z, self.nce_layers, encode_only=True)
+        feat_k = self.gen2A(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF2(
             feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF1(feat_q, self.opt.num_patches, sample_ids)
@@ -311,9 +315,11 @@ class DCLModel(BaseModel):
             visuals = {}
             AtoB = self.opt.direction == "AtoB"
             G = self.gen2B
+            D = self.disA
             source = data["A" if AtoB else "B"].to(self.device)
             if mode == "forward":
-                visuals["fake_A2B"] = G(source)
+                _, source_z = D(source)
+                visuals["fake_A2B"] = G(source_z)
             else:
                 raise ValueError("mode %s is not recognized" % mode)
             return visuals
