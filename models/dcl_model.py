@@ -76,7 +76,8 @@ class DCLModel(BaseModel):
         else:  # during test time, only load G
             self.model_names = ['G_A', 'G_B']
 
-        # ! define networks (both generator and discriminator)
+        # ! ####################################################################
+        # ! define networks (both generator and discriminator) #################
         self.netG_A = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG,
                                         not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias,
                                         opt.no_antialias_up, self.gpu_ids, opt)
@@ -97,6 +98,7 @@ class DCLModel(BaseModel):
             self.netD_B = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
                                             opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
                                             self.gpu_ids, opt)
+        # ! ####################################################################
             # create image buffer to store previously generated images
             self.fake_A_pool = ImagePool(opt.pool_size)
             # create image buffer to store previously generated images
@@ -146,19 +148,20 @@ class DCLModel(BaseModel):
 
         # ! 1] But the discriminator must use the generated images for its training no? (I think yes) -> Both the Discriminator and Generator start from scratch meaning they are both randomly initialized at start and then simultaneously trained.
 
-        # ! 2] Will it be two loops (in train.py)? (I think yes)
+        # ! 2] Will it be two loops (in train.py)? => No, just one
 
-        # ! 3] Do we continue training the discriminator even when training the generator? (I think yes)
+        # ! 3] Do we continue training the discriminator even when training the generator? => No the encoder is kept frozen as the model is trained for translation
 
         # * update D (same structure in DCLGAN) ################################
-        self.set_requires_grad([self.netD_A, self.netD_B], True)
+        self.set_requires_grad(
+            [self.netD_A, self.netD_B], True)  # * not frozen
         self.optimizer_D.zero_grad()
         self.backward_D_A()  # calculate gradients for D_A
         self.backward_D_B()  # calculate graidents for D_B
         self.optimizer_D.step()
 
         # * update G ###########################################################
-        self.set_requires_grad([self.netD_A, self.netD_B], False)
+        self.set_requires_grad([self.netD_A, self.netD_B], False)  # * frozen
         self.optimizer_G.zero_grad()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
@@ -179,7 +182,7 @@ class DCLModel(BaseModel):
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
-    def forward(self):
+    def forward(self):  # ? here
         # * Here we don't compute fake_B2A2B and fake_A2B2A as there is no Cycle-Consistency Loss
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         self.fake_B = self.netG_A(self.real_A)  # G_A(A)
@@ -189,7 +192,7 @@ class DCLModel(BaseModel):
             self.idt_A = self.netG_A(self.real_B)
             self.idt_B = self.netG_B(self.real_A)
 
-    def backward_D_basic(self, netD, real, fake):
+    def backward_D_basic(self, netD, real, fake):  # ? here
         """Calculate GAN loss for the discriminator
         Parameters:
             netD (network)      -- the discriminator D

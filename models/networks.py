@@ -1050,17 +1050,18 @@ class ResnetGenerator(nn.Module):
                  nn.ReLU(True)]
 
         n_downsampling = 2
-        for i in range(n_downsampling):  # * add downsampling layers ###########
-            mult = 2 ** i
-            if (no_antialias):
-                model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
-                          norm_layer(ngf * mult * 2),
-                          nn.ReLU(True)]
-            else:
-                model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=1, padding=1, bias=use_bias),
-                          norm_layer(ngf * mult * 2),
-                          nn.ReLU(True),
-                          Downsample(ngf * mult * 2)]
+        # TODO => (when downsampling layers are commented) RuntimeError: Given groups=1, weight of size [256, 256, 3, 3], expected input[1, 64, 258, 258] to have 256 channels, but got 64 channels instead
+        # for i in range(n_downsampling):  # * add downsampling layers ###########
+        #     mult = 2 ** i
+        #     if (no_antialias):
+        #         model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
+        #                   norm_layer(ngf * mult * 2),
+        #                   nn.ReLU(True)]
+        #     else:
+        #         model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=1, padding=1, bias=use_bias),
+        #                   norm_layer(ngf * mult * 2),
+        #                   nn.ReLU(True),
+        #                   Downsample(ngf * mult * 2)]
 
         mult = 2 ** n_downsampling
         for i in range(n_blocks):       # * add ResNet blocks ##################
@@ -1291,6 +1292,8 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x):
         """Forward function (with skip connections)"""
+        # TODO => (when downsampling layers are commented) RuntimeError: Given groups=1, weight of size [256, 256, 3, 3], expected input[1, 64, 258, 258] to have 256 channels, but got 64 channels instead
+        # * print(x.size()) # torch.Size([1, 64, 256, 256])
         out = x + self.conv_block(x)  # add skip connections
         return out
 
@@ -1543,6 +1546,7 @@ class GroupedChannelNorm(nn.Module):
 
 
 class DiscriminatorNICE(nn.Module):
+    # * Where the encoder is frozen during the translation training?
     def __init__(self, input_nc, ndf=64, n_layers=7):
         super(DiscriminatorNICE, self).__init__()
         model = [nn.ReflectionPad2d(1),
@@ -1642,6 +1646,8 @@ class DiscriminatorNICE(nn.Module):
         out0 = self.conv0(x0)
         out1 = self.conv1(x1)
 
+        # * Is one of these outputs connected to the generator? z is the one!
+        # ! z = the encoded image (transitioned images)
         return out0, out1, cam_logit, heatmap, z
 
 
