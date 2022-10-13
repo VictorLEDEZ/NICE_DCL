@@ -1043,14 +1043,15 @@ class ResnetGenerator(nn.Module):
         else:
             use_bias = norm_layer == nn.InstanceNorm2d
 
-        model = [nn.ReflectionPad2d(3),
-                 nn.Conv2d(input_nc, ngf, kernel_size=7,
-                           padding=0, bias=use_bias),
-                 norm_layer(ngf),
-                 nn.ReLU(True)]
+        model = []
+
+        # model = [nn.ReflectionPad2d(3),
+        #          nn.Conv2d(input_nc, ngf, kernel_size=7,
+        #                    padding=0, bias=use_bias),
+        #          norm_layer(ngf),
+        #          nn.ReLU(True)]
 
         n_downsampling = 2
-        # TODO => (when downsampling layers are commented) RuntimeError: Given groups=1, weight of size [256, 256, 3, 3], expected input[1, 64, 258, 258] to have 256 channels, but got 64 channels instead
         # for i in range(n_downsampling):  # * add downsampling layers ###########
         #     mult = 2 ** i
         #     if (no_antialias):
@@ -1114,7 +1115,7 @@ class ResnetGenerator(nn.Module):
             return feat, feats  # * return both output and intermediate features
         else:
             """Standard forward"""
-            # TODO => RuntimeError: Given groups=1, weight of size [64, 3, 7, 7], expected input[1, 512, 37, 37] to have 3 channels, but got 512 channels instead
+            # * print(input.size())  # torch.Size([1, 256, 64, 64])
             fake = self.model(input)
             return fake
 
@@ -1293,7 +1294,6 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x):
         """Forward function (with skip connections)"""
-        # TODO => (when downsampling layers are commented) RuntimeError: Given groups=1, weight of size [256, 256, 3, 3], expected input[1, 64, 258, 258] to have 256 channels, but got 64 channels instead
         # * print(x.size()) # torch.Size([1, 64, 256, 256])
         out = x + self.conv_block(x)  # add skip connections
         return out
@@ -1423,53 +1423,85 @@ class NLayerDiscriminator(nn.Module):
         """
         super(NLayerDiscriminator, self).__init__()
         # no need to use bias as BatchNorm2d has affine parameters
+        # if type(norm_layer) == functools.partial:
+        #     use_bias = norm_layer.func == nn.InstanceNorm2d
+        # else:
+        #     use_bias = norm_layer == nn.InstanceNorm2d
+
+        # kw = 4
+        # padw = 1
+        # if (no_antialias):
+        #     sequence = [nn.Conv2d(
+        #         input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
+        # else:
+        #     sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1,
+        #                           padding=padw), nn.LeakyReLU(0.2, True), Downsample(ndf)]
+        # nf_mult = 1
+        # nf_mult_prev = 1
+        # for n in range(1, n_layers):  # * gradually increase the number of filters
+        #     nf_mult_prev = nf_mult
+        #     nf_mult = min(2 ** n, 8)
+        #     if (no_antialias):
+        #         sequence += [
+        #             nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
+        #                       kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+        #             norm_layer(ndf * nf_mult),
+        #             nn.LeakyReLU(0.2, True)
+        #         ]
+        #     else:
+        #         sequence += [
+        #             nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
+        #                       kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+        #             norm_layer(ndf * nf_mult),
+        #             nn.LeakyReLU(0.2, True),
+        #             Downsample(ndf * nf_mult)]
+
+        # nf_mult_prev = nf_mult
+        # nf_mult = min(2 ** n_layers, 8)
+        # sequence += [
+        #     nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
+        #               kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+        #     norm_layer(ndf * nf_mult),
+        #     nn.LeakyReLU(0.2, True)
+        # ]
+
+        # ! ####################################################################
+        # ! NICE Encoder #######################################################
+
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
             use_bias = norm_layer == nn.InstanceNorm2d
 
-        kw = 4
-        padw = 1
-        if (no_antialias):
-            sequence = [nn.Conv2d(
-                input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
-        else:
-            sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1,
-                                  padding=padw), nn.LeakyReLU(0.2, True), Downsample(ndf)]
-        nf_mult = 1
-        nf_mult_prev = 1
-        for n in range(1, n_layers):  # * gradually increase the number of filters
-            nf_mult_prev = nf_mult
-            nf_mult = min(2 ** n, 8)
+        sequence = [nn.ReflectionPad2d(3),
+                    nn.Conv2d(input_nc, ndf, kernel_size=7,
+                              padding=0, bias=use_bias),
+                    norm_layer(ndf),
+                    nn.ReLU(True)]
+
+        n_downsampling = 2
+        for i in range(n_downsampling):
+            mult = 2 ** i
             if (no_antialias):
-                sequence += [
-                    nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-                              kernel_size=kw, stride=2, padding=padw, bias=use_bias),
-                    norm_layer(ndf * nf_mult),
-                    nn.LeakyReLU(0.2, True)
-                ]
+                sequence += [nn.Conv2d(ndf * mult, ndf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
+                             norm_layer(ndf * mult * 2),
+                             nn.ReLU(True)]
             else:
-                sequence += [
-                    nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-                              kernel_size=kw, stride=1, padding=padw, bias=use_bias),
-                    norm_layer(ndf * nf_mult),
-                    nn.LeakyReLU(0.2, True),
-                    Downsample(ndf * nf_mult)]
+                sequence += [nn.Conv2d(ndf * mult, ndf * mult * 2, kernel_size=3, stride=1, padding=1, bias=use_bias),
+                             norm_layer(ndf * mult * 2),
+                             nn.ReLU(True),
+                             Downsample(ndf * mult * 2)]
 
-        nf_mult_prev = nf_mult
-        nf_mult = min(2 ** n_layers, 8)
-        sequence += [
-            nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-                      kernel_size=kw, stride=1, padding=padw, bias=use_bias),
-            norm_layer(ndf * nf_mult),
-            nn.LeakyReLU(0.2, True)
-        ]
-
-        # * outputs the encoded input (z) ######################################
         self.encoder = nn.Sequential(*sequence)
 
+        # ! ####################################################################
+
         # * output 1 channel prediction map
-        sequence += [nn.Conv2d(ndf * nf_mult, 1,
+        kw = 4
+        padw = 1
+        nf_mult = 1
+
+        sequence += [nn.Conv2d(ndf * nf_mult * 4, 1,
                                kernel_size=kw, stride=1, padding=padw)]
         self.model = nn.Sequential(*sequence)
 
@@ -1737,7 +1769,6 @@ class ResnetGeneratorNICE(nn.Module):
 
     def forward(self, z):
         x = z  # * torch.Size([1, 3, 256, 256])
-        # TODO => RuntimeError: Given groups=1, weight of size [256, 128, 3, 3], expected input[1, 3, 258, 258] to have 128 channels, but got 3 channels instead
         x = self.UpBlock0(x)
 
         if self.light:

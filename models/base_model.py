@@ -107,8 +107,8 @@ class BaseModel(ABC):
     def parallelize(self):
         for name in self.model_names:
             if isinstance(name, str):
-                net = getattr(self, 'net' + name)
-                setattr(self, 'net' + name,
+                net = getattr(self, name)
+                setattr(self, name,
                         torch.nn.DataParallel(net, self.opt.gpu_ids))
 
     def data_dependent_initialize(self, data):
@@ -118,7 +118,7 @@ class BaseModel(ABC):
         """Make models eval mode during test time"""
         for name in self.model_names:
             if isinstance(name, str):
-                net = getattr(self, 'net' + name)
+                net = getattr(self, name)
                 net.eval()
 
     def test(self):
@@ -177,7 +177,7 @@ class BaseModel(ABC):
             if isinstance(name, str):
                 save_filename = '%s_net_%s.pth' % (epoch, name)
                 save_path = os.path.join(self.save_dir, save_filename)
-                net = getattr(self, 'net' + name)
+                net = getattr(self, name)
 
                 if len(self.gpu_ids) > 0 and torch.cuda.is_available():
                     torch.save(net.module.cpu().state_dict(), save_path)
@@ -216,7 +216,7 @@ class BaseModel(ABC):
                     load_dir = self.save_dir
 
                 load_path = os.path.join(load_dir, load_filename)
-                net = getattr(self, 'net' + name)
+                net = getattr(self, name)
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
                 print('loading the model from %s' % load_path)
@@ -241,7 +241,7 @@ class BaseModel(ABC):
         print('---------- Networks initialized -------------')
         for name in self.model_names:
             if isinstance(name, str):
-                net = getattr(self, 'net' + name)
+                net = getattr(self, name)
                 num_params = 0
                 for param in net.parameters():
                     num_params += param.numel()

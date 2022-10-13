@@ -58,7 +58,8 @@ class DCLModel(BaseModel):
 
         # specify the training losses you want to print out.
         # The training/test scripts will call <BaseModel.get_current_losses>
-        self.loss_names = ['D_A', 'G_A', 'NCE1', 'D_B', 'G_B', 'NCE2', 'G']
+        self.loss_names = ['disA', 'gen2B',
+                           'NCE1', 'disB', 'gen2A', 'NCE2', 'G']
         visual_names_A = ['real_A', 'fake_A2B']
         visual_names_B = ['real_B', 'fake_B2A']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
@@ -72,9 +73,10 @@ class DCLModel(BaseModel):
         self.visual_names = visual_names_A + visual_names_B
 
         if self.isTrain:
-            self.model_names = ['G_A', 'F1', 'D_A', 'G_B', 'F2', 'D_B']
+            self.model_names = ['gen2B', 'netF1',
+                                'disA', 'gen2A', 'netF2', 'disB']
         else:  # during test time, only load G
-            self.model_names = ['G_A', 'G_B']
+            self.model_names = ['gen2B', 'gen2A']
 
         # ! ####################################################################
         # ! define networks (both generator and discriminator) #################
@@ -133,8 +135,8 @@ class DCLModel(BaseModel):
         self.forward()  # compute fake images: G(A)
         if self.opt.isTrain:
             self.compute_G_loss().backward()  # calculate gradients for G
-            self.backward_D_A()  # calculate gradients for D_A
-            self.backward_D_B()  # calculate gradients for D_B
+            self.backward_D_A()  # calculate gradients for disA
+            self.backward_D_B()  # calculate gradients for disB
             self.optimizer_F = torch.optim.Adam(itertools.chain(
                 self.netF1.parameters(), self.netF2.parameters()))
             self.optimizers.append(self.optimizer_F)
@@ -156,8 +158,8 @@ class DCLModel(BaseModel):
         self.set_requires_grad(
             [self.disA, self.disB], True)  # * not frozen
         self.optimizer_D.zero_grad()
-        self.backward_D_A()  # calculate gradients for D_A
-        self.backward_D_B()  # calculate graidents for D_B
+        self.backward_D_A()  # calculate gradients for disA
+        self.backward_D_B()  # calculate graidents for disB
         self.optimizer_D.step()
 
         # * update G ###########################################################
@@ -166,6 +168,8 @@ class DCLModel(BaseModel):
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
         self.loss_G = self.compute_G_loss()
+
+        # TODO => RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [256, 128, 3, 3]] is at version 2; expected version 1 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
         self.loss_G.backward()
         self.optimizer_G.step()
         if self.opt.netF == 'mlp_sample':
@@ -185,8 +189,8 @@ class DCLModel(BaseModel):
     def forward(self):  # ? here => done v1
         # * Here we don't compute fake_B2A2B and fake_A2B2A as there is no Cycle-Consistency Loss
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        # self.fake_A2B = self.gen2B(self.real_A)  # G_A(A)
-        # self.fake_B2A = self.gen2A(self.real_B)  # G_B(B)
+        # self.fake_A2B = self.gen2B(self.real_A)  # gen2B(A)
+        # self.fake_B2A = self.gen2A(self.real_B)  # gen2A(B)
 
         _, self.real_A_z = self.disA(self.real_A)
         _, self.real_B_z = self.disB(self.real_B)
@@ -226,13 +230,13 @@ class DCLModel(BaseModel):
         return loss_D
 
     def backward_D_A(self):
-        """Calculate GAN loss for discriminator D_A"""
+        """Calculate GAN loss for discriminator disA"""
         fake_A2B = self.fake_B_pool.query(self.fake_A2B)
         self.loss_D_A = self.backward_D_basic(
             self.disA, self.real_B, fake_A2B) * self.opt.lambda_GAN
 
     def backward_D_B(self):
-        """Calculate GAN loss for discriminator D_B"""
+        """Calculate GAN loss for discriminator disB"""
         fake_B2A = self.fake_A_pool.query(self.fake_B2A)
         self.loss_D_B = self.backward_D_basic(
             self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN

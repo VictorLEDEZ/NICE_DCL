@@ -9,6 +9,9 @@ from util.visualizer import Visualizer
 
 # ! I might have to change to decoupled training here (NICE_GAN Training)
 if __name__ == '__main__':
+
+    torch.autograd.set_detect_anomaly(True)
+
     opt = TrainOptions().parse()   # get training options
     # create a dataset given opt.dataset_mode and other options
     dataset = create_dataset(opt)
