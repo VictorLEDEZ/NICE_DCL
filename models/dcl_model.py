@@ -204,7 +204,7 @@ class DCLModel(BaseModel):
             self.idt_A = self.gen2B(self.real_B_z)
             self.idt_B = self.gen2A(self.real_A_z)
 
-    def backward_D_basic(self, netD, real, fake):
+    def backward_D_basic(self, netD, real, fake):  # ? here
         """Calculate GAN loss for the discriminator
         Parameters:
             netD (network)      -- the discriminator D
@@ -215,10 +215,10 @@ class DCLModel(BaseModel):
         We also call loss_D.backward() to calculate the gradients.
         """
         # Real
-        pred_real = netD(real)
+        pred_real, _ = netD(real)
         loss_D_real = self.criterionGAN(pred_real, True)
         # Fake
-        pred_fake = netD(fake.detach())
+        pred_fake, _ = netD(fake.detach())
         loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
         loss_D = (loss_D_real + loss_D_fake) * 0.5
@@ -237,7 +237,7 @@ class DCLModel(BaseModel):
         self.loss_D_B = self.backward_D_basic(
             self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN
 
-    def compute_G_loss(self):  # ? here
+    def compute_G_loss(self):  # ? here => done
         """Calculate GAN and NCE loss for the generator"""
         fake_A2B = self.fake_A2B
         fake_B2A = self.fake_B2A
@@ -245,8 +245,8 @@ class DCLModel(BaseModel):
         # ! GAN LOSS ###########################################################
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
-            pred_fakeB = self.disA(fake_A2B)
-            pred_fakeA = self.disB(fake_B2A)
+            pred_fakeB, _ = self.disA(fake_A2B)
+            pred_fakeA, _ = self.disB(fake_B2A)
             self.loss_G_A = self.criterionGAN(
                 pred_fakeB, True).mean() * self.opt.lambda_GAN
             self.loss_G_B = self.criterionGAN(
@@ -280,7 +280,7 @@ class DCLModel(BaseModel):
         self.loss_G = (self.loss_G_A + self.loss_G_B) * 0.5 + loss_NCE_both
         return self.loss_G
 
-    def calculate_NCE_loss1(self, src, tgt):  # ? here
+    def calculate_NCE_loss1(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
         _, src_z = self.disA(src)
         _, tgt_z = self.disB(tgt)
@@ -295,7 +295,7 @@ class DCLModel(BaseModel):
             total_nce_loss += loss.mean()
         return total_nce_loss / n_layers
 
-    def calculate_NCE_loss2(self, src, tgt):  # ? here
+    def calculate_NCE_loss2(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
         _, src_z = self.disA(src)
         _, tgt_z = self.disB(tgt)

@@ -1109,11 +1109,12 @@ class ResnetGenerator(nn.Module):
                     pass
                 if layer_id == layers[-1] and encode_only:
                     # print('encoder only return features')
-                    return feats  # return intermediate features alone; stop in the last layers
+                    return feats  # * return intermediate features alone; stop in the last layers
 
-            return feat, feats  # return both output and intermediate features
+            return feat, feats  # * return both output and intermediate features
         else:
             """Standard forward"""
+            # TODO => RuntimeError: Given groups=1, weight of size [64, 3, 7, 7], expected input[1, 512, 37, 37] to have 3 channels, but got 512 channels instead
             fake = self.model(input)
             return fake
 
@@ -1407,6 +1408,7 @@ class UnetSkipConnectionBlock(nn.Module):
             return torch.cat([x, self.model(x)], 1)
 
 
+# ? where is the encoder and the classifier?
 class NLayerDiscriminator(nn.Module):
     """Defines a PatchGAN discriminator"""
 
@@ -1463,14 +1465,21 @@ class NLayerDiscriminator(nn.Module):
             nn.LeakyReLU(0.2, True)
         ]
 
-        # output 1 channel prediction map
+        # * outputs the encoded input (z) ######################################
+        self.encoder = nn.Sequential(*sequence)
+
+        # * output 1 channel prediction map
         sequence += [nn.Conv2d(ndf * nf_mult, 1,
                                kernel_size=kw, stride=1, padding=padw)]
         self.model = nn.Sequential(*sequence)
 
     def forward(self, input):
         """Standard forward."""
-        return self.model(input)
+
+        pred = self.model(input)
+        z = self.encoder(input)
+
+        return pred, z
 
 
 class PixelDiscriminator(nn.Module):
