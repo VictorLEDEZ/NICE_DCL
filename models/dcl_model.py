@@ -146,14 +146,6 @@ class DCLModel(BaseModel):
         # forward
         self.forward()
 
-        # ! as we can see, we update D and G at the same time for every epochs and piece of data in the dataset -> we need to change this to create the decoupled training. Firstly, we train the discriminator then, we reuse its encoder for training the generators.
-
-        # ! 1] But the discriminator must use the generated images for its training no? (I think yes) -> Both the Discriminator and Generator start from scratch meaning they are both randomly initialized at start and then simultaneously trained.
-
-        # ! 2] Will it be two loops (in train.py)? => No, just one
-
-        # ! 3] Do we continue training the discriminator even when training the generator? => No the encoder is kept frozen as the model is trained for translation
-
         # * update D (same structure in DCLGAN) ################################
         self.set_requires_grad(
             [self.disA, self.disB], True)  # * not frozen
@@ -169,8 +161,11 @@ class DCLModel(BaseModel):
             self.optimizer_F.zero_grad()
         self.loss_G = self.compute_G_loss()
 
+        # TODO #################################################################
         # TODO => RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [256, 128, 3, 3]] is at version 2; expected version 1 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
         self.loss_G.backward()
+        # TODO #################################################################
+
         self.optimizer_G.step()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.step()
@@ -202,8 +197,8 @@ class DCLModel(BaseModel):
             # self.idt_A = self.gen2B(self.real_B)
             # self.idt_B = self.gen2A(self.real_A)
 
-            _, self.real_B_z = self.disA(self.real_B)
-            _, self.real_A_z = self.disB(self.real_A)
+            _, self.real_B_z = self.disB(self.real_B)
+            _, self.real_A_z = self.disA(self.real_A)
 
             self.idt_A = self.gen2B(self.real_B_z)
             self.idt_B = self.gen2A(self.real_A_z)
@@ -232,13 +227,13 @@ class DCLModel(BaseModel):
     def backward_D_A(self):
         """Calculate GAN loss for discriminator disA"""
         fake_A2B = self.fake_B_pool.query(self.fake_A2B)
-        self.loss_D_A = self.backward_D_basic(
+        self.loss_disA = self.backward_D_basic(
             self.disA, self.real_B, fake_A2B) * self.opt.lambda_GAN
 
     def backward_D_B(self):
         """Calculate GAN loss for discriminator disB"""
         fake_B2A = self.fake_A_pool.query(self.fake_B2A)
-        self.loss_D_B = self.backward_D_basic(
+        self.loss_disB = self.backward_D_basic(
             self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN
 
     def compute_G_loss(self):  # ? here => done
@@ -251,13 +246,13 @@ class DCLModel(BaseModel):
         if self.opt.lambda_GAN > 0.0:
             pred_fakeB, _ = self.disA(fake_A2B)
             pred_fakeA, _ = self.disB(fake_B2A)
-            self.loss_G_A = self.criterionGAN(
+            self.loss_gen2B = self.criterionGAN(
                 pred_fakeB, True).mean() * self.opt.lambda_GAN
-            self.loss_G_B = self.criterionGAN(
+            self.loss_gen2A = self.criterionGAN(
                 pred_fakeA, True).mean() * self.opt.lambda_GAN
         else:
-            self.loss_G_A = 0.0
-            self.loss_G_B = 0.0
+            self.loss_gen2B = 0.0
+            self.loss_gen2A = 0.0
 
         # ! NCE LOSS ###########################################################
         if self.opt.lambda_NCE > 0.0:
@@ -281,13 +276,13 @@ class DCLModel(BaseModel):
             loss_NCE_both = (self.loss_NCE1 + self.loss_NCE2) * 0.5
 
         # ! FULL OBJECTIVE #####################################################
-        self.loss_G = (self.loss_G_A + self.loss_G_B) * 0.5 + loss_NCE_both
+        self.loss_G = (self.loss_gen2B + self.loss_gen2A) * 0.5 + loss_NCE_both
         return self.loss_G
 
     def calculate_NCE_loss1(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        _, src_z = self.disA(src)
         _, tgt_z = self.disB(tgt)
+        _, src_z = self.disA(src)
         feat_q = self.gen2A(tgt_z, self.nce_layers, encode_only=True)
         feat_k = self.gen2B(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF1(
@@ -301,8 +296,8 @@ class DCLModel(BaseModel):
 
     def calculate_NCE_loss2(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        _, src_z = self.disA(src)
-        _, tgt_z = self.disB(tgt)
+        _, tgt_z = self.disA(tgt)
+        _, src_z = self.disB(src)
         feat_q = self.gen2B(tgt_z, self.nce_layers, encode_only=True)
         feat_k = self.gen2A(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF2(

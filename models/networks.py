@@ -1467,7 +1467,6 @@ class NLayerDiscriminator(nn.Module):
 
         # ! ####################################################################
         # ! NICE Encoder #######################################################
-
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
@@ -1493,7 +1492,6 @@ class NLayerDiscriminator(nn.Module):
                              Downsample(ndf * mult * 2)]
 
         self.encoder = nn.Sequential(*sequence)
-
         # ! ####################################################################
 
         # * output 1 channel prediction map
@@ -1508,8 +1506,16 @@ class NLayerDiscriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
 
+        z = self.encoder(input).detach()
         pred = self.model(input)
-        z = self.encoder(input)
+
+        # print('------------------------')
+        # print('z: ')
+        # print(z.size())
+
+        # print('------------------------')
+        # print('pred: ')
+        # print(pred.size())
 
         return pred, z
 
