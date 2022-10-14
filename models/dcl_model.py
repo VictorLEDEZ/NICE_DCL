@@ -93,14 +93,23 @@ class DCLModel(BaseModel):
                                        not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids,
                                        opt)
 
-        if self.isTrain:  # * here we define the discriminators
+        # * Runs during testing
+        if self.isTrain == False:
             self.disA = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
                                           opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
                                           self.gpu_ids, opt)
             self.disB = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
                                           opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
                                           self.gpu_ids, opt)
-        # ! ####################################################################
+
+        # * Runs during training
+        if self.isTrain:
+            self.disA = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
+                                          opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
+                                          self.gpu_ids, opt)
+            self.disB = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
+                                          opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
+                                          self.gpu_ids, opt)
             # create image buffer to store previously generated images
             self.fake_A_pool = ImagePool(opt.pool_size)
             # create image buffer to store previously generated images
@@ -120,6 +129,7 @@ class DCLModel(BaseModel):
                                                 lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
+        # ! ####################################################################
 
     def data_dependent_initialize(self, data):
         """
