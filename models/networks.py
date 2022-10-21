@@ -1,4 +1,5 @@
 import functools
+from pickle import TRUE
 
 import numpy as np
 import torch
@@ -1495,27 +1496,25 @@ class NLayerDiscriminator(nn.Module):
         # ! ####################################################################
 
         # * output 1 channel prediction map
-        kw = 4
-        padw = 1
-        nf_mult = 1
+        model = [nn.Conv2d(ndf * 4, 1,
+                           kernel_size=4, stride=1, padding=1)]
+        self.model = nn.Sequential(*model)
 
-        sequence += [nn.Conv2d(ndf * nf_mult * 4, 1,
-                               kernel_size=kw, stride=1, padding=padw)]
-        self.model = nn.Sequential(*sequence)
-
-    def forward(self, input):
+    def forward(self, input, discriminating=TRUE):
         """Standard forward."""
 
-        z = self.encoder(input).detach()
-        pred = self.model(input)
+        # TODO #################################################################
+        # TODO => Fix the training inconsistency there (losses of generators are not converging). The encoder is trained for both discriminating and translanting. I need to change it so that it is trained only for discriminating.
+        # z = self.encoder(input).detach()
 
-        # print('------------------------')
-        # print('z: ')
-        # print(z.size())
+        if discriminating == TRUE:  # backward
+            z = self.encoder(input)
+        else:  # no backward
+            z = self.encoder(input).detach()
 
-        # print('------------------------')
-        # print('pred: ')
-        # print(pred.size())
+        # TODO #################################################################
+
+        pred = self.model(z)
 
         return pred, z
 

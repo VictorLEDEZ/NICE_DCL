@@ -1,4 +1,5 @@
 import itertools
+from pickle import FALSE
 import torch
 from .base_model import BaseModel
 from . import networks
@@ -170,12 +171,7 @@ class DCLModel(BaseModel):
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
         self.loss_G = self.compute_G_loss()
-
-        # TODO #################################################################
-        # TODO => RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [256, 128, 3, 3]] is at version 2; expected version 1 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
         self.loss_G.backward()
-        # TODO #################################################################
-
         self.optimizer_G.step()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.step()
@@ -197,8 +193,10 @@ class DCLModel(BaseModel):
         # self.fake_A2B = self.gen2B(self.real_A)  # gen2B(A)
         # self.fake_B2A = self.gen2A(self.real_B)  # gen2A(B)
 
-        _, self.real_A_z = self.disA(self.real_A)
-        _, self.real_B_z = self.disB(self.real_B)
+        _, self.real_A_z = self.disA(
+            input=self.real_A.detach(), discriminating=FALSE)
+        _, self.real_B_z = self.disB(
+            input=self.real_B.detach(), discriminating=FALSE)
 
         self.fake_A2B = self.gen2B(self.real_A_z)
         self.fake_B2A = self.gen2A(self.real_B_z)
@@ -207,8 +205,10 @@ class DCLModel(BaseModel):
             # self.idt_A = self.gen2B(self.real_B)
             # self.idt_B = self.gen2A(self.real_A)
 
-            _, self.real_B_z = self.disB(self.real_B)
-            _, self.real_A_z = self.disA(self.real_A)
+            _, self.real_B_z = self.disB(
+                input=self.real_B.detach(), discriminating=FALSE)
+            _, self.real_A_z = self.disA(
+                input=self.real_A.detach(), discriminating=FALSE)
 
             self.idt_A = self.gen2B(self.real_B_z)
             self.idt_B = self.gen2A(self.real_A_z)
@@ -291,8 +291,8 @@ class DCLModel(BaseModel):
 
     def calculate_NCE_loss1(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        _, tgt_z = self.disB(tgt)
-        _, src_z = self.disA(src)
+        _, tgt_z = self.disB(input=tgt.detach(), discriminating=FALSE)
+        _, src_z = self.disA(input=src.detach(), discriminating=FALSE)
         feat_q = self.gen2A(tgt_z, self.nce_layers, encode_only=True)
         feat_k = self.gen2B(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF1(
@@ -306,8 +306,8 @@ class DCLModel(BaseModel):
 
     def calculate_NCE_loss2(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        _, tgt_z = self.disA(tgt)
-        _, src_z = self.disB(src)
+        _, tgt_z = self.disA(input=tgt.detach(), discriminating=FALSE)
+        _, src_z = self.disB(input=src.detach(), discriminating=FALSE)
         feat_q = self.gen2B(tgt_z, self.nce_layers, encode_only=True)
         feat_k = self.gen2A(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF2(
@@ -327,7 +327,7 @@ class DCLModel(BaseModel):
             D = self.disA
             source = data["A" if AtoB else "B"].to(self.device)
             if mode == "forward":
-                _, source_z = D(source)
+                _, source_z = D(input=source.detach(), discriminating=FALSE)
                 visuals["fake_A2B"] = G(source_z)
             else:
                 raise ValueError("mode %s is not recognized" % mode)
