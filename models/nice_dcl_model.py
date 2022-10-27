@@ -1,4 +1,5 @@
 import itertools
+from pickle import FALSE
 import torch
 from .base_model import BaseModel
 from . import networks
@@ -7,7 +8,7 @@ import util.util as util
 from util.image_pool import ImagePool
 
 
-class DCLModel(BaseModel):
+class NICEDCLModel(BaseModel):
     """ This class implements DCLGAN model.
     This code is inspired by CUT and CycleGAN.
     """
@@ -53,14 +54,15 @@ class DCLModel(BaseModel):
 
         return parser
 
-    def __init__(self, opt):
+    def __init__(self, opt):  # ? Maybe change something here
         BaseModel.__init__(self, opt)
 
         # specify the training losses you want to print out.
         # The training/test scripts will call <BaseModel.get_current_losses>
-        self.loss_names = ['D_A', 'G_A', 'NCE1', 'D_B', 'G_B', 'NCE2', 'G']
-        visual_names_A = ['real_A', 'fake_B']
-        visual_names_B = ['real_B', 'fake_A']
+        self.loss_names = ['disA', 'gen2B',
+                           'NCE1', 'disB', 'gen2A', 'NCE2', 'G']
+        visual_names_A = ['real_A', 'fake_A2B']
+        visual_names_B = ['real_B', 'fake_B2A']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
 
         if opt.nce_idt and self.isTrain:
@@ -72,31 +74,34 @@ class DCLModel(BaseModel):
         self.visual_names = visual_names_A + visual_names_B
 
         if self.isTrain:
-            self.model_names = ['G_A', 'F1', 'D_A', 'G_B', 'F2', 'D_B']
+            self.model_names = ['gen2B', 'netF1',
+                                'disA', 'gen2A', 'netF2', 'disB']
         else:  # during test time, only load G
-            self.model_names = ['G_A', 'G_B']
+            self.model_names = ['gen2B', 'gen2A']
 
-        # define networks (both generator and discriminator)
-        self.netG_A = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG,
-                                        not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias,
-                                        opt.no_antialias_up, self.gpu_ids, opt)
-        self.netG_B = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG,
-                                        not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias,
-                                        opt.no_antialias_up, self.gpu_ids, opt)
+        # ! ####################################################################
+        # ! define networks (both generator and discriminator) #################
+        self.gen2B = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG,
+                                       not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias,
+                                       opt.no_antialias_up, self.gpu_ids, opt)
+        self.gen2A = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG,
+                                       not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias,
+                                       opt.no_antialias_up, self.gpu_ids, opt)
         self.netF1 = networks.define_F(opt.input_nc, opt.netF, opt.normG,
                                        not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids,
                                        opt)
         self.netF2 = networks.define_F(opt.input_nc, opt.netF, opt.normG,
                                        not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids,
                                        opt)
+        self.disA = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
+                                      opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
+                                      self.gpu_ids, opt)
+        self.disB = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
+                                      opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
+                                      self.gpu_ids, opt)
+        # ! ####################################################################
 
         if self.isTrain:
-            self.netD_A = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
-                                            opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
-                                            self.gpu_ids, opt)
-            self.netD_B = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
-                                            opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias,
-                                            self.gpu_ids, opt)
             # create image buffer to store previously generated images
             self.fake_A_pool = ImagePool(opt.pool_size)
             # create image buffer to store previously generated images
@@ -110,9 +115,9 @@ class DCLModel(BaseModel):
 
             self.criterionIdt = torch.nn.L1Loss().to(self.device)
             self.criterionSim = torch.nn.L1Loss('sum').to(self.device)
-            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()),
+            self.optimizer_G = torch.optim.Adam(itertools.chain(self.gen2B.parameters(), self.gen2A.parameters()),
                                                 lr=opt.lr, betas=(opt.beta1, opt.beta2))
-            self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD_A.parameters(), self.netD_B.parameters()),
+            self.optimizer_D = torch.optim.Adam(itertools.chain(self.disA.parameters(), self.disB.parameters()),
                                                 lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
@@ -130,26 +135,28 @@ class DCLModel(BaseModel):
         self.real_B = self.real_B[:bs_per_gpu]
         self.forward()  # compute fake images: G(A)
         if self.opt.isTrain:
-            self.compute_G_loss().backward()  # calculate graidents for G
-            self.backward_D_A()  # calculate gradients for D_A
-            self.backward_D_B()  # calculate graidents for D_B
+            self.compute_G_loss().backward()  # calculate gradients for G
+            self.backward_D_A()  # calculate gradients for disA
+            self.backward_D_B()  # calculate gradients for disB
             self.optimizer_F = torch.optim.Adam(itertools.chain(
                 self.netF1.parameters(), self.netF2.parameters()))
             self.optimizers.append(self.optimizer_F)
 
-    def optimize_parameters(self):
+    def optimize_parameters(self):  # ? maybe change something here
+        # * we call this function for every epochs and data
         # forward
         self.forward()
 
-        # update D
-        self.set_requires_grad([self.netD_A, self.netD_B], True)
+        # * update D (same structure in DCLGAN) ################################
+        self.set_requires_grad(
+            [self.disA, self.disB], True)  # * not frozen
         self.optimizer_D.zero_grad()
-        self.backward_D_A()  # calculate gradients for D_A
-        self.backward_D_B()  # calculate graidents for D_B
+        self.backward_D_A()  # calculate gradients for disA
+        self.backward_D_B()  # calculate graidents for disB
         self.optimizer_D.step()
 
-        # update G
-        self.set_requires_grad([self.netD_A, self.netD_B], False)
+        # * update G ###########################################################
+        self.set_requires_grad([self.disA, self.disB], False)  # * frozen
         self.optimizer_G.zero_grad()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
@@ -170,16 +177,33 @@ class DCLModel(BaseModel):
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
-    def forward(self):
+    def forward(self):  # ? here => done v1
+        # * Here we don't compute fake_B2A2B and fake_A2B2A as there is no Cycle-Consistency Loss
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        self.fake_B = self.netG_A(self.real_A)  # G_A(A)
-        self.fake_A = self.netG_B(self.real_B)  # G_B(B)
+        # self.fake_A2B = self.gen2B(self.real_A)  # gen2B(A)
+        # self.fake_B2A = self.gen2A(self.real_B)  # gen2A(B)
+
+        _, self.real_A_z = self.disA(
+            input=self.real_A.detach(), discriminating=FALSE)
+        _, self.real_B_z = self.disB(
+            input=self.real_B.detach(), discriminating=FALSE)
+
+        self.fake_A2B = self.gen2B(self.real_A_z)
+        self.fake_B2A = self.gen2A(self.real_B_z)
 
         if self.opt.nce_idt:
-            self.idt_A = self.netG_A(self.real_B)
-            self.idt_B = self.netG_B(self.real_A)
+            # self.idt_A = self.gen2B(self.real_B)
+            # self.idt_B = self.gen2A(self.real_A)
 
-    def backward_D_basic(self, netD, real, fake):
+            _, self.real_B_z = self.disB(
+                input=self.real_B.detach(), discriminating=FALSE)
+            _, self.real_A_z = self.disA(
+                input=self.real_A.detach(), discriminating=FALSE)
+
+            self.idt_A = self.gen2B(self.real_B_z)
+            self.idt_B = self.gen2A(self.real_A_z)
+
+    def backward_D_basic(self, netD, real, fake):  # ? here
         """Calculate GAN loss for the discriminator
         Parameters:
             netD (network)      -- the discriminator D
@@ -190,10 +214,10 @@ class DCLModel(BaseModel):
         We also call loss_D.backward() to calculate the gradients.
         """
         # Real
-        pred_real = netD(real)
+        pred_real, _ = netD(real)
         loss_D_real = self.criterionGAN(pred_real, True)
         # Fake
-        pred_fake = netD(fake.detach())
+        pred_fake, _ = netD(fake.detach())
         loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
         loss_D = (loss_D_real + loss_D_fake) * 0.5
@@ -201,44 +225,46 @@ class DCLModel(BaseModel):
         return loss_D
 
     def backward_D_A(self):
-        """Calculate GAN loss for discriminator D_A"""
-        fake_B = self.fake_B_pool.query(self.fake_B)
-        self.loss_D_A = self.backward_D_basic(
-            self.netD_A, self.real_B, fake_B) * self.opt.lambda_GAN
+        """Calculate GAN loss for discriminator disA"""
+        fake_A2B = self.fake_B_pool.query(self.fake_A2B)
+        self.loss_disA = self.backward_D_basic(
+            self.disA, self.real_B, fake_A2B) * self.opt.lambda_GAN
 
     def backward_D_B(self):
-        """Calculate GAN loss for discriminator D_B"""
-        fake_A = self.fake_A_pool.query(self.fake_A)
-        self.loss_D_B = self.backward_D_basic(
-            self.netD_B, self.real_A, fake_A) * self.opt.lambda_GAN
+        """Calculate GAN loss for discriminator disB"""
+        fake_B2A = self.fake_A_pool.query(self.fake_B2A)
+        self.loss_disB = self.backward_D_basic(
+            self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN
 
-    def compute_G_loss(self):
+    def compute_G_loss(self):  # ? here => done
         """Calculate GAN and NCE loss for the generator"""
-        fakeB = self.fake_B
-        fakeA = self.fake_A
+        fake_A2B = self.fake_A2B
+        fake_B2A = self.fake_B2A
 
+        # ! GAN LOSS ###########################################################
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
-            pred_fakeB = self.netD_A(fakeB)
-            pred_fakeA = self.netD_B(fakeA)
-            self.loss_G_A = self.criterionGAN(
+            pred_fakeB, _ = self.disA(fake_A2B)
+            pred_fakeA, _ = self.disB(fake_B2A)
+            self.loss_gen2B = self.criterionGAN(
                 pred_fakeB, True).mean() * self.opt.lambda_GAN
-            self.loss_G_B = self.criterionGAN(
+            self.loss_gen2A = self.criterionGAN(
                 pred_fakeA, True).mean() * self.opt.lambda_GAN
         else:
-            self.loss_G_A = 0.0
-            self.loss_G_B = 0.0
+            self.loss_gen2B = 0.0
+            self.loss_gen2A = 0.0
 
+        # ! NCE LOSS ###########################################################
         if self.opt.lambda_NCE > 0.0:
             self.loss_NCE1 = self.calculate_NCE_loss1(
-                self.real_A, self.fake_B) * self.opt.lambda_NCE
+                self.real_A, self.fake_A2B) * self.opt.lambda_NCE
             self.loss_NCE2 = self.calculate_NCE_loss2(
-                self.real_B, self.fake_A) * self.opt.lambda_NCE
+                self.real_B, self.fake_B2A) * self.opt.lambda_NCE
         else:
             self.loss_NCE1, self.loss_NCE_bd, self.loss_NCE2 = 0.0, 0.0, 0.0
         if self.opt.lambda_NCE > 0.0:
 
-            # L1 IDENTICAL Loss
+            # ! L1 IDENTICAL LOSS
             self.loss_idt_A = self.criterionIdt(
                 self.idt_A, self.real_B) * self.opt.lambda_IDT
             self.loss_idt_B = self.criterionIdt(
@@ -249,13 +275,16 @@ class DCLModel(BaseModel):
         else:
             loss_NCE_both = (self.loss_NCE1 + self.loss_NCE2) * 0.5
 
-        self.loss_G = (self.loss_G_A + self.loss_G_B) * 0.5 + loss_NCE_both
+        # ! FULL OBJECTIVE #####################################################
+        self.loss_G = (self.loss_gen2B + self.loss_gen2A) * 0.5 + loss_NCE_both
         return self.loss_G
 
-    def calculate_NCE_loss1(self, src, tgt):
+    def calculate_NCE_loss1(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        feat_q = self.netG_B(tgt, self.nce_layers, encode_only=True)
-        feat_k = self.netG_A(src, self.nce_layers, encode_only=True)
+        _, tgt_z = self.disB(input=tgt.detach(), discriminating=FALSE)
+        _, src_z = self.disA(input=src.detach(), discriminating=FALSE)
+        feat_q = self.gen2A(tgt_z, self.nce_layers, encode_only=True)
+        feat_k = self.gen2B(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF1(
             feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF2(feat_q, self.opt.num_patches, sample_ids)
@@ -265,10 +294,12 @@ class DCLModel(BaseModel):
             total_nce_loss += loss.mean()
         return total_nce_loss / n_layers
 
-    def calculate_NCE_loss2(self, src, tgt):
+    def calculate_NCE_loss2(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        feat_q = self.netG_A(tgt, self.nce_layers, encode_only=True)
-        feat_k = self.netG_B(src, self.nce_layers, encode_only=True)
+        _, tgt_z = self.disA(input=tgt.detach(), discriminating=FALSE)
+        _, src_z = self.disB(input=src.detach(), discriminating=FALSE)
+        feat_q = self.gen2B(tgt_z, self.nce_layers, encode_only=True)
+        feat_k = self.gen2A(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF2(
             feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF1(feat_q, self.opt.num_patches, sample_ids)
@@ -282,10 +313,12 @@ class DCLModel(BaseModel):
         with torch.no_grad():
             visuals = {}
             AtoB = self.opt.direction == "AtoB"
-            G = self.netG_A
+            G = self.gen2B
+            D = self.disA
             source = data["A" if AtoB else "B"].to(self.device)
             if mode == "forward":
-                visuals["fake_B"] = G(source)
+                _, source_z = D(input=source.detach(), discriminating=FALSE)
+                visuals["fake_A2B"] = G(source_z)
             else:
                 raise ValueError("mode %s is not recognized" % mode)
             return visuals

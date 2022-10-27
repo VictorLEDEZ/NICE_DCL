@@ -34,7 +34,7 @@ class BaseOptions():
         parser.add_argument('--checkpoints_dir', type=str,
                             default='./checkpoints', help='models are saved here')
         # model parameters
-        parser.add_argument('--model', type=str, default='dcl',
+        parser.add_argument('--model', type=str, default='nice_dcl',
                             help='chooses which model to use.')
         parser.add_argument('--input_nc', type=int, default=3,
                             help='# of input image channels: 3 for RGB and 1 for grayscale')
@@ -44,10 +44,10 @@ class BaseOptions():
                             help='# of gen filters in the last conv layer')
         parser.add_argument('--ndf', type=int, default=64,
                             help='# of discrim filters in the first conv layer')
-        parser.add_argument('--netD', type=str, default='basic', choices=['basic', 'n_layers', 'NICE', 'pixel', 'patch', 'tilestylegan2', 'stylegan2'],
+        parser.add_argument('--netD', type=str, default='basic_nice_dcl', choices=['basic', 'basic_nice_dcl', 'n_layers', 'pixel', 'patch', 'tilestylegan2', 'stylegan2'],
                             help='specify discriminator architecture. The basic model is a 70x70 PatchGAN. n_layers allows you to specify the layers in the discriminator')
-        parser.add_argument('--netG', type=str, default='resnet_9blocks', choices=[
-                            'resnet_9blocks', 'resnet_6blocks', 'NICE', 'unet_256', 'unet_128', 'stylegan2', 'smallstylegan2', 'resnet_cat'], help='specify generator architecture')
+        parser.add_argument('--netG', type=str, default='resnet_9blocks_nice_dcl', choices=[
+                            'resnet_9blocks', 'resnet_9blocks_nice_dcl', 'resnet_6blocks', 'unet_256', 'unet_128', 'stylegan2', 'smallstylegan2', 'resnet_cat'], help='specify generator architecture')
         parser.add_argument('--n_layers_D', type=int,
                             default=3, help='only used if netD==n_layers')
         parser.add_argument('--normG', type=str, default='instance', choices=[
