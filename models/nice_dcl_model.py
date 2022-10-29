@@ -195,11 +195,12 @@ class NICEDCLModel(BaseModel):
             # self.idt_A = self.gen2B(self.real_B)
             # self.idt_B = self.gen2A(self.real_A)
 
-            _, self.real_B_z = self.disB(
+            _, self.real_B_z = self.disA(
                 input=self.real_B.detach(), discriminating=FALSE)
-            _, self.real_A_z = self.disA(
+            _, self.real_A_z = self.disB(
                 input=self.real_A.detach(), discriminating=FALSE)
 
+            # TODO this should be of size [1, 3, 256, 256] but we got [1, 3, 24, 24]
             self.idt_A = self.gen2B(self.real_B_z)
             self.idt_B = self.gen2A(self.real_A_z)
 
@@ -265,8 +266,19 @@ class NICEDCLModel(BaseModel):
         if self.opt.lambda_NCE > 0.0:
 
             # ! L1 IDENTICAL LOSS
+            # TODO #############################################################
+            # TODO RuntimeError: The size of tensor a (24) must match the size of tensor b (256) at non-singleton dimension 3
+
+            # * self.idt_A (This one is the problem) ---------------------------
+            # * torch.Size([1, 3, 24, 24])
+
+            # * self.real_B ----------------------------------------------------
+            # * torch.Size([1, 3, 256, 256])
+            # * 256 is the size of the real image
+
             self.loss_idt_A = self.criterionIdt(
                 self.idt_A, self.real_B) * self.opt.lambda_IDT
+            # TODO #############################################################
             self.loss_idt_B = self.criterionIdt(
                 self.idt_B, self.real_A) * self.opt.lambda_IDT
             loss_NCE_both = (self.loss_NCE1 + self.loss_NCE2) * \
@@ -287,7 +299,10 @@ class NICEDCLModel(BaseModel):
         feat_k = self.gen2B(src_z, self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF1(
             feat_k, self.opt.num_patches, None)
+        # TODO #################################################################
+        # TODO RuntimeError: CUDA error: device-side assert triggered. CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. For debugging consider passing CUDA_LAUNCH_BLOCKING = 1.
         feat_q_pool, _ = self.netF2(feat_q, self.opt.num_patches, sample_ids)
+        # TODO #################################################################
         total_nce_loss = 0.0
         for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
             loss = crit(f_q, f_k)

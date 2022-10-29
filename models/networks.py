@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.optim import lr_scheduler
@@ -305,12 +306,15 @@ def define_F(input_nc, netF, norm='batch', use_dropout=False, init_type='normal'
         net = ReshapeF()
     elif netF == 'mapping':
         net = MappingF(input_nc, gpu_ids=gpu_ids)
+    # TODO #####################################################################
+    # TODO RuntimeError: CUDA error: device-side assert triggered. CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. For debugging consider passing CUDA_LAUNCH_BLOCKING = 1.
     elif netF == 'sample':
         net = PatchSampleF(use_mlp=False, init_type=init_type,
                            init_gain=init_gain, gpu_ids=gpu_ids, nc=opt.netF_nc)
     elif netF == 'mlp_sample':
         net = PatchSampleF(use_mlp=True, init_type=init_type,
                            init_gain=init_gain, gpu_ids=gpu_ids, nc=opt.netF_nc)
+    # TODO #####################################################################
     elif netF == 'strided_conv':
         net = StridedConvF(init_type=init_type,
                            init_gain=init_gain, gpu_ids=gpu_ids)
@@ -356,7 +360,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     if netD == 'basic':  # default PatchGAN classifier
         net = NLayerDiscriminator(
             input_nc, ndf, n_layers=3, norm_layer=norm_layer, no_antialias=no_antialias,)
-    elif netD == 'basic_nice_dcl':  # default PatchGAN classifier
+    elif netD == 'basic_nice_dcl':  # ! added
         net = NLayerDiscriminatorNICEDCL(
             input_nc, ndf, n_layers=3, norm_layer=norm_layer, no_antialias=no_antialias,)
     elif netD == 'n_layers':  # more options
@@ -660,7 +664,10 @@ class PatchSampleF(nn.Module):
                 patch_id = []
             if self.use_mlp:
                 mlp = getattr(self, 'mlp_%d' % feat_id)
+                # TODO #########################################################
+                # TODO RuntimeError: CUDA error: device-side assert triggered. CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. For debugging consider passing CUDA_LAUNCH_BLOCKING = 1.
                 x_sample = mlp(x_sample)
+                # TODO #########################################################
             return_ids.append(patch_id)
             x_sample = self.l2norm(x_sample)
 
@@ -1155,7 +1162,7 @@ class ResnetGeneratorNICEDCL(nn.Module):
         #          norm_layer(ngf),
         #          nn.ReLU(True)]
 
-        n_downsampling = 2
+        n_downsampling = input_nc  # ! 2 before
         # for i in range(n_downsampling):  # * add downsampling layers ###########
         #     mult = 2 ** i
         #     if (no_antialias):
@@ -1171,6 +1178,8 @@ class ResnetGeneratorNICEDCL(nn.Module):
         mult = 2 ** n_downsampling
         for i in range(n_blocks):       # * add ResNet blocks ##################
 
+            # TODO needs input of [256, 256, 3, 3] but we got [1, 512, 31, 31]
+            # TODO we can do a resize
             model += [ResnetBlock(ngf * mult, padding_type=padding_type,
                                   norm_layer=norm_layer, use_dropout=use_dropout, use_bias=use_bias)]
 
@@ -1219,8 +1228,10 @@ class ResnetGeneratorNICEDCL(nn.Module):
             return feat, feats  # * return both output and intermediate features
         else:
             """Standard forward"""
-            # * print(input.size())  # torch.Size([1, 256, 64, 64])
-            fake = self.model(input)
+            # * As input we have: torch.Size([1, 512, 31, 31]) so 1 piece of data with 512 chanels of 31x31 images
+            transform = torchvision.transforms.Resize((3, 3))
+            out = transform(input)
+            fake = self.model(out)
             return fake
 
 
@@ -1582,6 +1593,7 @@ class NLayerDiscriminator(nn.Module):
 
 class NLayerDiscriminatorNICEDCL(nn.Module):
     """Defines a PatchGAN discriminator"""
+    # ? I should try with the basic discriminator as here we are using an NLayer encoder which might be screwing up the generation. Here we have 3 layers. "reuse early layers of certain number in the discriminator as the encoder of the target domain"
 
     def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, no_antialias=False):
         """Construct a PatchGAN discriminator
@@ -1594,80 +1606,57 @@ class NLayerDiscriminatorNICEDCL(nn.Module):
         """
         super(NLayerDiscriminatorNICEDCL, self).__init__()
         # no need to use bias as BatchNorm2d has affine parameters
-        # if type(norm_layer) == functools.partial:
-        #     use_bias = norm_layer.func == nn.InstanceNorm2d
-        # else:
-        #     use_bias = norm_layer == nn.InstanceNorm2d
-
-        # kw = 4
-        # padw = 1
-        # if (no_antialias):
-        #     sequence = [nn.Conv2d(
-        #         input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
-        # else:
-        #     sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1,
-        #                           padding=padw), nn.LeakyReLU(0.2, True), Downsample(ndf)]
-        # nf_mult = 1
-        # nf_mult_prev = 1
-        # for n in range(1, n_layers):  # * gradually increase the number of filters
-        #     nf_mult_prev = nf_mult
-        #     nf_mult = min(2 ** n, 8)
-        #     if (no_antialias):
-        #         sequence += [
-        #             nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-        #                       kernel_size=kw, stride=2, padding=padw, bias=use_bias),
-        #             norm_layer(ndf * nf_mult),
-        #             nn.LeakyReLU(0.2, True)
-        #         ]
-        #     else:
-        #         sequence += [
-        #             nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-        #                       kernel_size=kw, stride=1, padding=padw, bias=use_bias),
-        #             norm_layer(ndf * nf_mult),
-        #             nn.LeakyReLU(0.2, True),
-        #             Downsample(ndf * nf_mult)]
-
-        # nf_mult_prev = nf_mult
-        # nf_mult = min(2 ** n_layers, 8)
-        # sequence += [
-        #     nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-        #               kernel_size=kw, stride=1, padding=padw, bias=use_bias),
-        #     norm_layer(ndf * nf_mult),
-        #     nn.LeakyReLU(0.2, True)
-        # ]
-
-        # ! ####################################################################
-        # ! ResnetGenerator Encoder ############################################
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
             use_bias = norm_layer == nn.InstanceNorm2d
 
-        sequence = [nn.ReflectionPad2d(3),
-                    nn.Conv2d(input_nc, ndf, kernel_size=7,
-                              padding=0, bias=use_bias),
-                    norm_layer(ndf),
-                    nn.ReLU(True)]
-
-        n_downsampling = 2
-        for i in range(n_downsampling):
-            mult = 2 ** i
+        # ! ####################################################################
+        # ! Discriminator Encoder ##############################################
+        # * this time we use this one rather than the one of the Generator
+        kw = 4
+        padw = 1
+        if (no_antialias):
+            sequence = [nn.Conv2d(
+                input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
+        else:
+            sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1,
+                                  padding=padw), nn.LeakyReLU(0.2, True), Downsample(ndf)]
+        nf_mult = 1
+        nf_mult_prev = 1
+        for n in range(1, n_layers):  # gradually increase the number of filters
+            nf_mult_prev = nf_mult
+            nf_mult = min(2 ** n, 8)
             if (no_antialias):
-                sequence += [nn.Conv2d(ndf * mult, ndf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
-                             norm_layer(ndf * mult * 2),
-                             nn.ReLU(True)]
+                sequence += [
+                    nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
+                              kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                    norm_layer(ndf * nf_mult),
+                    nn.LeakyReLU(0.2, True)
+                ]
             else:
-                sequence += [nn.Conv2d(ndf * mult, ndf * mult * 2, kernel_size=3, stride=1, padding=1, bias=use_bias),
-                             norm_layer(ndf * mult * 2),
-                             nn.ReLU(True),
-                             Downsample(ndf * mult * 2)]
+                sequence += [
+                    nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
+                              kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+                    norm_layer(ndf * nf_mult),
+                    nn.LeakyReLU(0.2, True),
+                    Downsample(ndf * nf_mult)]
+
+        nf_mult_prev = nf_mult
+        nf_mult = min(2 ** n_layers, 8)
+        sequence += [
+            nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
+                      kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+            norm_layer(ndf * nf_mult),
+            nn.LeakyReLU(0.2, True)
+        ]
 
         self.encoder = nn.Sequential(*sequence)
         # ! ####################################################################
 
         # * output 1 channel prediction map
-        model = [nn.Conv2d(ndf * 4, 1,
-                           kernel_size=4, stride=1, padding=1)]
+        model = [nn.Conv2d(ndf * nf_mult, 1,
+                           kernel_size=kw, stride=1, padding=padw)]
         self.model = nn.Sequential(*model)
 
     def forward(self, input, discriminating=TRUE):
