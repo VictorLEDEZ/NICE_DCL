@@ -54,7 +54,7 @@ class NICEDCLModel(BaseModel):
 
         return parser
 
-    def __init__(self, opt):  # ? Maybe change something here
+    def __init__(self, opt):
         BaseModel.__init__(self, opt)
 
         # specify the training losses you want to print out.
@@ -64,6 +64,9 @@ class NICEDCLModel(BaseModel):
         visual_names_A = ['real_A', 'fake_A2B']
         visual_names_B = ['real_B', 'fake_B2A']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
+        # * self.nce_layers-----------------------
+        # * [4, 8, 12, 16]
+        # * self.nce_layers-----------------------
 
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['idt_B', 'idt_A']
@@ -142,7 +145,13 @@ class NICEDCLModel(BaseModel):
                 self.netF1.parameters(), self.netF2.parameters()))
             self.optimizers.append(self.optimizer_F)
 
-    def optimize_parameters(self):  # ? maybe change something here
+    def optimize_parameters(self):
+        # TODO #################################################################
+        # TODO RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [1]] is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
+        '''
+        The traceback shows that the error is occurring in the optimize_parameters method of nice_dcl_model.py, which is called from train.py. It looks like the error is occurring while trying to compute the gradients of the loss_G variable.
+        '''
+        # TODO #################################################################
         # * we call this function for every epochs and data
         # forward
         self.forward()
@@ -160,6 +169,7 @@ class NICEDCLModel(BaseModel):
         self.optimizer_G.zero_grad()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
+        # TODO the error might be here
         self.loss_G = self.compute_G_loss()
         self.loss_G.backward()
         self.optimizer_G.step()
@@ -183,26 +193,25 @@ class NICEDCLModel(BaseModel):
         # self.fake_A2B = self.gen2B(self.real_A)  # gen2B(A)
         # self.fake_B2A = self.gen2A(self.real_B)  # gen2A(B)
 
-        _, self.real_A_z = self.disA(
-            input=self.real_A.detach(), discriminating=FALSE)
-        _, self.real_B_z = self.disB(
-            input=self.real_B.detach(), discriminating=FALSE)
+        _, _, _, _, self.real_A_z = self.disA(
+            self.real_A)
+        _, _, _, _, self.real_B_z = self.disB(
+            self.real_B)
 
-        self.fake_A2B = self.gen2B(self.real_A_z)
-        self.fake_B2A = self.gen2A(self.real_B_z)
+        self.fake_A2B = self.gen2B(input=self.real_A_z)
+        self.fake_B2A = self.gen2A(input=self.real_B_z)
 
         if self.opt.nce_idt:
             # self.idt_A = self.gen2B(self.real_B)
             # self.idt_B = self.gen2A(self.real_A)
 
-            _, self.real_B_z = self.disA(
-                input=self.real_B.detach(), discriminating=FALSE)
-            _, self.real_A_z = self.disB(
-                input=self.real_A.detach(), discriminating=FALSE)
+            _, _, _, _, self.real_B_z = self.disA(
+                self.real_B)
+            _, _, _, _, self.real_A_z = self.disB(
+                self.real_A)
 
-            # TODO this should be of size [1, 3, 256, 256] but we got [1, 3, 24, 24]
-            self.idt_A = self.gen2B(self.real_B_z)
-            self.idt_B = self.gen2A(self.real_A_z)
+            self.idt_A = self.gen2B(input=self.real_B_z)
+            self.idt_B = self.gen2A(input=self.real_A_z)
 
     def backward_D_basic(self, netD, real, fake):  # ? here
         """Calculate GAN loss for the discriminator
@@ -215,10 +224,10 @@ class NICEDCLModel(BaseModel):
         We also call loss_D.backward() to calculate the gradients.
         """
         # Real
-        pred_real, _ = netD(real)
+        pred_real, _, _, _, _ = netD(real)
         loss_D_real = self.criterionGAN(pred_real, True)
         # Fake
-        pred_fake, _ = netD(fake.detach())
+        pred_fake, _, _, _, _ = netD(fake.detach())
         loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
         loss_D = (loss_D_real + loss_D_fake) * 0.5
@@ -238,6 +247,7 @@ class NICEDCLModel(BaseModel):
             self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN
 
     def compute_G_loss(self):  # ? here => done
+        # TODO the error might be here
         """Calculate GAN and NCE loss for the generator"""
         fake_A2B = self.fake_A2B
         fake_B2A = self.fake_B2A
@@ -245,8 +255,8 @@ class NICEDCLModel(BaseModel):
         # ! GAN LOSS ###########################################################
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
-            pred_fakeB, _ = self.disA(fake_A2B)
-            pred_fakeA, _ = self.disB(fake_B2A)
+            pred_fakeB, _, _, _, _ = self.disA(fake_A2B)
+            pred_fakeA, _, _, _, _ = self.disB(fake_B2A)
             self.loss_gen2B = self.criterionGAN(
                 pred_fakeB, True).mean() * self.opt.lambda_GAN
             self.loss_gen2A = self.criterionGAN(
@@ -266,19 +276,8 @@ class NICEDCLModel(BaseModel):
         if self.opt.lambda_NCE > 0.0:
 
             # ! L1 IDENTICAL LOSS
-            # TODO #############################################################
-            # TODO RuntimeError: The size of tensor a (24) must match the size of tensor b (256) at non-singleton dimension 3
-
-            # * self.idt_A (This one is the problem) ---------------------------
-            # * torch.Size([1, 3, 24, 24])
-
-            # * self.real_B ----------------------------------------------------
-            # * torch.Size([1, 3, 256, 256])
-            # * 256 is the size of the real image
-
             self.loss_idt_A = self.criterionIdt(
                 self.idt_A, self.real_B) * self.opt.lambda_IDT
-            # TODO #############################################################
             self.loss_idt_B = self.criterionIdt(
                 self.idt_B, self.real_A) * self.opt.lambda_IDT
             loss_NCE_both = (self.loss_NCE1 + self.loss_NCE2) * \
@@ -293,16 +292,20 @@ class NICEDCLModel(BaseModel):
 
     def calculate_NCE_loss1(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        _, tgt_z = self.disB(input=tgt.detach(), discriminating=FALSE)
-        _, src_z = self.disA(input=src.detach(), discriminating=FALSE)
-        feat_q = self.gen2A(tgt_z, self.nce_layers, encode_only=True)
-        feat_k = self.gen2B(src_z, self.nce_layers, encode_only=True)
+        _, feat_q = self.disB(
+            input=tgt, layers=self.nce_layers, encode_only=True)
+        _, feat_k = self.disA(
+            input=src, layers=self.nce_layers, encode_only=True)
+        # print('------------------------------------------------------------------')
+        # print('len(feat_q)------------------------------------------------------')
+        # print(len(feat_q))
+        # print('len(feat_k)-----------------------------------------------------')
+        # print(len(feat_k))
+        # print('------------------------------------------------------------------')
+        # ! feats should be of len 4 but we got only 2
         feat_k_pool, sample_ids = self.netF1(
             feat_k, self.opt.num_patches, None)
-        # TODO #################################################################
-        # TODO RuntimeError: CUDA error: device-side assert triggered. CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. For debugging consider passing CUDA_LAUNCH_BLOCKING = 1.
         feat_q_pool, _ = self.netF2(feat_q, self.opt.num_patches, sample_ids)
-        # TODO #################################################################
         total_nce_loss = 0.0
         for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
             loss = crit(f_q, f_k)
@@ -311,10 +314,10 @@ class NICEDCLModel(BaseModel):
 
     def calculate_NCE_loss2(self, src, tgt):  # ? here => done
         n_layers = len(self.nce_layers)
-        _, tgt_z = self.disA(input=tgt.detach(), discriminating=FALSE)
-        _, src_z = self.disB(input=src.detach(), discriminating=FALSE)
-        feat_q = self.gen2B(tgt_z, self.nce_layers, encode_only=True)
-        feat_k = self.gen2A(src_z, self.nce_layers, encode_only=True)
+        _, feat_q = self.disA(
+            input=tgt, layers=self.nce_layers, encode_only=True)
+        _, feat_k = self.disB(
+            input=src, layers=self.nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF2(
             feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF1(feat_q, self.opt.num_patches, sample_ids)
@@ -332,8 +335,8 @@ class NICEDCLModel(BaseModel):
             D = self.disA
             source = data["A" if AtoB else "B"].to(self.device)
             if mode == "forward":
-                _, source_z = D(input=source.detach(), discriminating=FALSE)
-                visuals["fake_A2B"] = G(source_z)
+                _, _, _, _, source_z = D(source)
+                visuals["fake_A2B"] = G(input=source_z)
             else:
                 raise ValueError("mode %s is not recognized" % mode)
             return visuals

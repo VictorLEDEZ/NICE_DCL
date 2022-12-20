@@ -57,7 +57,6 @@ if __name__ == '__main__':
             # unpack data from dataset and apply preprocessing
             model.set_input(data)
             # calculate loss functions, get gradients, update network weights
-            # ? update here maybe (optimizing params for every epochs and elements in the dataset)
             model.optimize_parameters()  # * we call this function for every epochs and data
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
