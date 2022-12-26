@@ -138,20 +138,13 @@ class NICEDCLModel(BaseModel):
         self.real_B = self.real_B[:bs_per_gpu]
         self.forward()  # compute fake images: G(A)
         if self.opt.isTrain:
+            self.compute_D_loss().backward(retain_graph=True)
             self.compute_G_loss().backward()  # calculate gradients for G
-            self.backward_D_A()  # calculate gradients for disA
-            self.backward_D_B()  # calculate gradients for disB
             self.optimizer_F = torch.optim.Adam(itertools.chain(
                 self.netF1.parameters(), self.netF2.parameters()))
             self.optimizers.append(self.optimizer_F)
 
     def optimize_parameters(self):
-        # TODO #################################################################
-        # TODO RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [1]] is at version 1; expected version 0 instead. Hint: the backtrace further above shows the operation that failed to compute its gradient. The variable in question was changed in there or anywhere later. Good luck!
-        '''
-        The traceback shows that the error is occurring in the optimize_parameters method of nice_dcl_model.py, which is called from train.py. It looks like the error is occurring while trying to compute the gradients of the loss_G variable.
-        '''
-        # TODO #################################################################
         # * we call this function for every epochs and data
         # forward
         self.forward()
@@ -160,8 +153,8 @@ class NICEDCLModel(BaseModel):
         self.set_requires_grad(
             [self.disA, self.disB], True)  # * not frozen
         self.optimizer_D.zero_grad()
-        self.backward_D_A()  # calculate gradients for disA
-        self.backward_D_B()  # calculate graidents for disB
+        self.loss_D = self.compute_D_loss()
+        self.loss_D.backward(retain_graph=True)
         self.optimizer_D.step()
 
         # * update G ###########################################################
@@ -169,9 +162,8 @@ class NICEDCLModel(BaseModel):
         self.optimizer_G.zero_grad()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
-        # TODO the error might be here
         self.loss_G = self.compute_G_loss()
-        self.loss_G.backward()
+        self.loss_G.backward(retain_graph=True)
         self.optimizer_G.step()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.step()
@@ -187,7 +179,7 @@ class NICEDCLModel(BaseModel):
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
-    def forward(self):  # ? here => done v1
+    def forward(self):
         # * Here we don't compute fake_B2A2B and fake_A2B2A as there is no Cycle-Consistency Loss
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         # self.fake_A2B = self.gen2B(self.real_A)  # gen2B(A)
@@ -213,7 +205,9 @@ class NICEDCLModel(BaseModel):
             self.idt_A = self.gen2B(input=self.real_B_z)
             self.idt_B = self.gen2A(input=self.real_A_z)
 
-    def backward_D_basic(self, netD, real, fake):  # ? here
+    #!##########################################################################
+    #! Discriminator Losses ####################################################
+    def backward_D_basic(self, netD, real, fake):
         """Calculate GAN loss for the discriminator
         Parameters:
             netD (network)      -- the discriminator D
@@ -231,39 +225,18 @@ class NICEDCLModel(BaseModel):
         loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
         loss_D = (loss_D_real + loss_D_fake) * 0.5
-        loss_D.backward()
         return loss_D
 
-    def backward_D_A(self):
+    def compute_D_loss(self):
         """Calculate GAN loss for discriminator disA"""
         fake_A2B = self.fake_B_pool.query(self.fake_A2B)
         self.loss_disA = self.backward_D_basic(
             self.disA, self.real_B, fake_A2B) * self.opt.lambda_GAN
 
-    def backward_D_B(self):
         """Calculate GAN loss for discriminator disB"""
         fake_B2A = self.fake_A_pool.query(self.fake_B2A)
         self.loss_disB = self.backward_D_basic(
             self.disB, self.real_A, fake_B2A) * self.opt.lambda_GAN
-
-    def compute_G_loss(self):  # ? here => done
-        # TODO the error might be here
-        """Calculate GAN and NCE loss for the generator"""
-        fake_A2B = self.fake_A2B
-        fake_B2A = self.fake_B2A
-
-        # ! GAN LOSS ###########################################################
-        # First, G(A) should fake the discriminator
-        if self.opt.lambda_GAN > 0.0:
-            pred_fakeB, _, _, _, _ = self.disA(fake_A2B)
-            pred_fakeA, _, _, _, _ = self.disB(fake_B2A)
-            self.loss_gen2B = self.criterionGAN(
-                pred_fakeB, True).mean() * self.opt.lambda_GAN
-            self.loss_gen2A = self.criterionGAN(
-                pred_fakeA, True).mean() * self.opt.lambda_GAN
-        else:
-            self.loss_gen2B = 0.0
-            self.loss_gen2A = 0.0
 
         # ! NCE LOSS ###########################################################
         if self.opt.lambda_NCE > 0.0:
@@ -286,11 +259,9 @@ class NICEDCLModel(BaseModel):
         else:
             loss_NCE_both = (self.loss_NCE1 + self.loss_NCE2) * 0.5
 
-        # ! FULL OBJECTIVE #####################################################
-        self.loss_G = (self.loss_gen2B + self.loss_gen2A) * 0.5 + loss_NCE_both
-        return self.loss_G
+        return loss_NCE_both + (0.5 * (self.loss_disA + self.loss_disB))
 
-    def calculate_NCE_loss1(self, src, tgt):  # ? here => done
+    def calculate_NCE_loss1(self, src, tgt):
         n_layers = len(self.nce_layers)
         _, feat_q = self.disB(
             input=tgt, layers=self.nce_layers, encode_only=True)
@@ -312,7 +283,7 @@ class NICEDCLModel(BaseModel):
             total_nce_loss += loss.mean()
         return total_nce_loss / n_layers
 
-    def calculate_NCE_loss2(self, src, tgt):  # ? here => done
+    def calculate_NCE_loss2(self, src, tgt):
         n_layers = len(self.nce_layers)
         _, feat_q = self.disA(
             input=tgt, layers=self.nce_layers, encode_only=True)
@@ -326,6 +297,30 @@ class NICEDCLModel(BaseModel):
             loss = crit(f_q, f_k)
             total_nce_loss += loss.mean()
         return total_nce_loss / n_layers
+
+    #!##########################################################################
+    #! Generator Losses ########################################################
+    def compute_G_loss(self):
+        """Calculate GAN and NCE loss for the generator"""
+        fake_A2B = self.fake_A2B
+        fake_B2A = self.fake_B2A
+
+        # ! GAN LOSS ###########################################################
+        # First, G(A) should fake the discriminator
+        if self.opt.lambda_GAN > 0.0:
+            pred_fakeB, _, _, _, _ = self.disA(fake_A2B)
+            pred_fakeA, _, _, _, _ = self.disB(fake_B2A)
+            self.loss_gen2B = self.criterionGAN(
+                pred_fakeB, True).mean() * self.opt.lambda_GAN
+            self.loss_gen2A = self.criterionGAN(
+                pred_fakeA, True).mean() * self.opt.lambda_GAN
+        else:
+            self.loss_gen2B = 0.0
+            self.loss_gen2A = 0.0
+
+        # ! FULL OBJECTIVE #####################################################
+        self.loss_G = (self.loss_gen2B + self.loss_gen2A) * 0.5
+        return self.loss_G
 
     def generate_visuals_for_evaluation(self, data, mode):
         with torch.no_grad():

@@ -306,15 +306,12 @@ def define_F(input_nc, netF, norm='batch', use_dropout=False, init_type='normal'
         net = ReshapeF()
     elif netF == 'mapping':
         net = MappingF(input_nc, gpu_ids=gpu_ids)
-    # TODO #####################################################################
-    # TODO RuntimeError: CUDA error: device-side assert triggered. CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. For debugging consider passing CUDA_LAUNCH_BLOCKING = 1.
     elif netF == 'sample':
         net = PatchSampleF(use_mlp=False, init_type=init_type,
                            init_gain=init_gain, gpu_ids=gpu_ids, nc=opt.netF_nc)
     elif netF == 'mlp_sample':
         net = PatchSampleF(use_mlp=True, init_type=init_type,
                            init_gain=init_gain, gpu_ids=gpu_ids, nc=opt.netF_nc)
-    # TODO #####################################################################
     elif netF == 'strided_conv':
         net = StridedConvF(init_type=init_type,
                            init_gain=init_gain, gpu_ids=gpu_ids)
@@ -631,14 +628,10 @@ class PatchSampleF(nn.Module):
 
     def create_mlp(self, feats):
         for mlp_id, feat in enumerate(feats):
-            # TODO #############################################################
-            # TODO AttributeError: 'list' object has no attribute 'shape'
             input_nc = feat.shape[1]
-            # TODO #############################################################
             '''
             It looks like you are trying to train a model and are encountering an error. The error message suggests that there is an issue with the shape of an input to the create_mlp function in the networks.py file. It seems that feat is a list object, but the shape attribute is being accessed as if it were a tensor.
             '''
-            # TODO #############################################################
             mlp = nn.Sequential(
                 *[nn.Linear(input_nc, self.nc), nn.ReLU(), nn.Linear(self.nc, self.nc)])
             if len(self.gpu_ids) > 0:
@@ -671,10 +664,7 @@ class PatchSampleF(nn.Module):
                 patch_id = []
             if self.use_mlp:
                 mlp = getattr(self, 'mlp_%d' % feat_id)
-                # TODO #########################################################
-                # TODO RuntimeError: CUDA error: device-side assert triggered. CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. For debugging consider passing CUDA_LAUNCH_BLOCKING = 1.
                 x_sample = mlp(x_sample)
-                # TODO #########################################################
             return_ids.append(patch_id)
             x_sample = self.l2norm(x_sample)
 
@@ -1631,7 +1621,6 @@ class ResnetGeneratorNICEDCL(nn.Module):
         self.FC = nn.Sequential(*FC)
         self.UpBlock0 = nn.Sequential(*UpBlock0)
         self.UpBlock2 = nn.Sequential(*UpBlock2)
-        self.model = nn.Sequential(*UpBlock0, *FC, *UpBlock2)
 
     def forward(self, input):
         x = input
