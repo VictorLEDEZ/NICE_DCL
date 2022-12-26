@@ -7,7 +7,6 @@ from models import create_model
 from options.train_options import TrainOptions
 from util.visualizer import Visualizer
 
-# ! I might have to change to decoupled training here (NICE_GAN Training)
 if __name__ == '__main__':
 
     torch.autograd.set_detect_anomaly(True)

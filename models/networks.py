@@ -1545,7 +1545,7 @@ class GroupedChannelNorm(nn.Module):
 
 
 #!################################################################################
-#! NICEDCL (Added)
+#! NICEDCL (Added) We are using the generator and the discriminator of the NICE-GAN model.
 #!################################################################################
 
 
@@ -1915,6 +1915,7 @@ class DiscriminatorNICEDCL(nn.Module):
         self.Dis1_1 = nn.Sequential(*Dis1_1)
 
     def forward(self, input, layers=[], encode_only=False):
+        # * We need to get those intermediate features to compute the PatchNCE Loss.
         if -1 in layers:
             layers.append(len(self.model))
         if len(layers) > 0:

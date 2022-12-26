@@ -64,9 +64,6 @@ class NICEDCLModel(BaseModel):
         visual_names_A = ['real_A', 'fake_A2B']
         visual_names_B = ['real_B', 'fake_B2A']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
-        # * self.nce_layers-----------------------
-        # * [4, 8, 12, 16]
-        # * self.nce_layers-----------------------
 
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['idt_B', 'idt_A']
@@ -154,7 +151,7 @@ class NICEDCLModel(BaseModel):
             [self.disA, self.disB], True)  # * not frozen
         self.optimizer_D.zero_grad()
         self.loss_D = self.compute_D_loss()
-        self.loss_D.backward(retain_graph=True)
+        self.loss_D.backward()
         self.optimizer_D.step()
 
         # * update G ###########################################################
@@ -163,7 +160,7 @@ class NICEDCLModel(BaseModel):
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
         self.loss_G = self.compute_G_loss()
-        self.loss_G.backward(retain_graph=True)
+        self.loss_G.backward()
         self.optimizer_G.step()
         if self.opt.netF == 'mlp_sample':
             self.optimizer_F.step()
@@ -180,11 +177,9 @@ class NICEDCLModel(BaseModel):
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
     def forward(self):
-        # * Here we don't compute fake_B2A2B and fake_A2B2A as there is no Cycle-Consistency Loss
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        # self.fake_A2B = self.gen2B(self.real_A)  # gen2B(A)
-        # self.fake_B2A = self.gen2A(self.real_B)  # gen2A(B)
 
+        # * As we reuse the encoder of the discriminator in the generator we call the discriminator first and, we pass the encoded image in the discriminator.
         _, _, _, _, self.real_A_z = self.disA(
             self.real_A)
         _, _, _, _, self.real_B_z = self.disB(
@@ -194,9 +189,6 @@ class NICEDCLModel(BaseModel):
         self.fake_B2A = self.gen2A(input=self.real_B_z)
 
         if self.opt.nce_idt:
-            # self.idt_A = self.gen2B(self.real_B)
-            # self.idt_B = self.gen2A(self.real_A)
-
             _, _, _, _, self.real_B_z = self.disA(
                 self.real_B)
             _, _, _, _, self.real_A_z = self.disB(
@@ -267,13 +259,6 @@ class NICEDCLModel(BaseModel):
             input=tgt, layers=self.nce_layers, encode_only=True)
         _, feat_k = self.disA(
             input=src, layers=self.nce_layers, encode_only=True)
-        # print('------------------------------------------------------------------')
-        # print('len(feat_q)------------------------------------------------------')
-        # print(len(feat_q))
-        # print('len(feat_k)-----------------------------------------------------')
-        # print(len(feat_k))
-        # print('------------------------------------------------------------------')
-        # ! feats should be of len 4 but we got only 2
         feat_k_pool, sample_ids = self.netF1(
             feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF2(feat_q, self.opt.num_patches, sample_ids)
@@ -330,6 +315,7 @@ class NICEDCLModel(BaseModel):
             D = self.disA
             source = data["A" if AtoB else "B"].to(self.device)
             if mode == "forward":
+                # * As we reuse the encoder of the discriminator in the generator we call the discriminator first and, we pass the encoded image in the discriminator.
                 _, _, _, _, source_z = D(source)
                 visuals["fake_A2B"] = G(input=source_z)
             else:
